@@ -137,3 +137,25 @@ def test_retriever_result_schema_empty_query_and_top_k():
     assert results[0].document_id == "doc-1"
     assert results[0].text
     assert isinstance(results[0].score, float)
+
+
+def test_qdrant_persistent_path_mode_saves_to_disk(tmp_path):
+    qdrant_dir = str(tmp_path / "qdrant_storage")
+    config = VectorStoreConfig(collection_name="test_persistent", url=qdrant_dir, recreate_collection=True)
+    store = QdrantVectorStore(config)
+    chunks = FixedSizeChunker(ChunkingConfig(max_chunk_size=5, overlap=0)).chunk(
+        make_document("persistent vector content stored on disk")
+    )
+    store.ensure_collection(3)
+    store.upsert(chunks, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    assert store.collection_exists()
+    store.close()
+
+    # Re-open same path with new instance (simulating app restart)
+    reloaded_store = QdrantVectorStore(VectorStoreConfig(collection_name="test_persistent", url=qdrant_dir, recreate_collection=False))
+    assert reloaded_store.collection_exists()
+    results = reloaded_store.search([1.0, 0.0, 0.0], top_k=1)
+    assert len(results) == 1
+    assert results[0].chunk_id == chunks[0].chunk_id
+    reloaded_store.close()
+

@@ -26,7 +26,7 @@ def main() -> int:
     parser.add_argument("--mock-embeddings", action="store_true")
     parser.add_argument("--query", action="append", dest="queries")
     args = parser.parse_args()
-    loader_config = replace(LoaderConfig.from_env(), sample_size=args.sample_size)
+    loader_config = LoaderConfig.from_env(sample_size=args.sample_size)
     chunking_config = replace(ChunkingConfig.from_env(), strategy="fixed")
     embedding_config = EmbeddingConfig.from_env()
     if args.mock_embeddings:
@@ -38,7 +38,8 @@ def main() -> int:
         provider = SentenceTransformerEmbedder(embedding_config)
     embedder = CachedEmbedder(provider, config=embedding_config) if embedding_config.cache_enabled else provider
     store = QdrantVectorStore(VectorStoreConfig.from_env())
-    documents, _ = DatasetLoader(loader_config).load_documents()
+    documents, stats = DatasetLoader(loader_config).load_documents()
+    print(f"Loaded {len(documents)} documents from {stats.records_read} records using backend={loader_config.backend} (sample_size={loader_config.sample_size})")
     index_documents(
         documents,
         embedder=embedder,

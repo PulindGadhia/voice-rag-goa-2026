@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+from threading import RLock
 from pathlib import Path
 from typing import Sequence
 
@@ -39,10 +40,18 @@ class CachedEmbedder:
         self.config = config or getattr(provider, "config", EmbeddingConfig())
         self.cache_path = cache_path or self.config.cache_path
         self.stats = EmbeddingCacheStats()
+        self._lock = RLock()
         self._connection: sqlite3.Connection | None = None
         if self.cache_path != ":memory:":
             Path(self.cache_path).parent.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(self.cache_path)
+        # Retrieval is invoked from the application's worker thread. Allow
+        # that thread to reuse the long-lived cache connection; calls remain
+        # serialized by the lock below.
+        self._connection = sqlite3.connect(self.cache_path, check_same_thread=False)
+        self._connection.execute("PRAGMA journal_mode=WAL")
+        self._connection.execute("PRAGMA synchronous=NORMAL")
+        self._connection.execute("PRAGMA temp_store=MEMORY")
+        self._connection.execute("PRAGMA mmap_size=67108864")  # 64 MB mmap
         self._connection.execute(
             """
             CREATE TABLE IF NOT EXISTS embeddings (
@@ -73,6 +82,12 @@ class CachedEmbedder:
         return self.embed_batch([text], input_type=input_type)[0]
 
     def embed_batch(
+        self, texts: Sequence[str], *, input_type: str = "passage"
+    ) -> list[list[float]]:
+        with self._lock:
+            return self._embed_batch(texts, input_type=input_type)
+
+    def _embed_batch(
         self, texts: Sequence[str], *, input_type: str = "passage"
     ) -> list[list[float]]:
         if not texts:

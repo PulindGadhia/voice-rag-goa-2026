@@ -64,6 +64,16 @@ def test_reranker_handles_empty_query_and_candidates_without_model_call():
     assert model.calls == []
 
 
+def test_reranker_warmup_respects_existing_disabled_configuration():
+    model = FakeCrossEncoder([1.0])
+    reranker = CrossEncoderReranker(
+        RerankerConfig(model_name="fake", warmup_enabled=False), model=model
+    )
+    timing = reranker.warmup()
+    assert timing.model_calls == 0
+    assert model.calls == []
+
+
 def test_reranker_deduplicates_truncates_and_orders_ties_deterministically():
     model = FakeCrossEncoder([0.5, 0.5])
     reranker = CrossEncoderReranker(

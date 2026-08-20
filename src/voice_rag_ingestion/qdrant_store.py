@@ -10,6 +10,15 @@ from typing import Any, Sequence
 from .chunking.base import Chunk
 
 
+def _load_local_env() -> None:
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(override=False)
+    except ImportError:
+        pass
+
+
 @dataclass(frozen=True)
 class VectorStoreConfig:
     url: str = ":memory:"
@@ -18,9 +27,11 @@ class VectorStoreConfig:
     recreate_collection: bool = True
     timeout: float = 60.0
     upsert_batch_size: int = 64
+    on_disk_payload: bool = True
 
     @classmethod
     def from_env(cls) -> "VectorStoreConfig":
+        _load_local_env()
         return cls(
             url=os.getenv("QDRANT_URL", cls.url),
             collection_name=os.getenv("QDRANT_COLLECTION", cls.collection_name),
@@ -31,6 +42,8 @@ class VectorStoreConfig:
             upsert_batch_size=int(
                 os.getenv("QDRANT_UPSERT_BATCH_SIZE", str(cls.upsert_batch_size))
             ),
+            on_disk_payload=os.getenv("QDRANT_ON_DISK_PAYLOAD", "true").lower()
+            in {"1", "true", "yes", "on"},
         )
 
 
@@ -45,9 +58,11 @@ class RetrievedChunk:
 
 def chunk_payload(chunk: Chunk) -> dict[str, Any]:
     source = dict(chunk.source)
+    parent_id = getattr(chunk, "parent_chunk_id", None) or chunk.document_id
     return {
         "chunk_id": chunk.chunk_id,
         "document_id": chunk.document_id,
+        "parent_chunk_id": parent_id,
         "query_id": chunk.query_id,
         "language": chunk.language,
         "chunk_strategy": chunk.chunk_strategy,
@@ -85,11 +100,15 @@ class QdrantVectorStore:
             raise RuntimeError("qdrant-client is required for vector storage") from exc
         if self.config.url in {":memory:", "memory"}:
             self.client = QdrantClient(":memory:")
-        else:
+        elif self.config.url.startswith(("http://", "https://")):
             kwargs: dict[str, Any] = {"url": self.config.url, "timeout": self.config.timeout}
             if self.config.api_key:
                 kwargs["api_key"] = self.config.api_key
             self.client = QdrantClient(**kwargs)
+        else:
+            # Filesystem path for persistent embedded storage (e.g. ".cache/qdrant")
+            os.makedirs(self.config.url, exist_ok=True)
+            self.client = QdrantClient(path=self.config.url)
 
     def collection_exists(self) -> bool:
         if hasattr(self.client, "collection_exists"):
@@ -108,10 +127,18 @@ class QdrantVectorStore:
         if not exists:
             from qdrant_client.models import Distance, VectorParams
 
-            self.client.create_collection(
-                collection_name=self.config.collection_name,
-                vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
-            )
+            kwargs: dict[str, Any] = {
+                "collection_name": self.config.collection_name,
+                "vectors_config": VectorParams(size=vector_size, distance=Distance.COSINE),
+            }
+            if self.config.on_disk_payload:
+                kwargs["on_disk_payload"] = True
+            try:
+                self.client.create_collection(**kwargs)
+            except TypeError:
+                # Fallback for mock clients that don't accept on_disk_payload
+                kwargs.pop("on_disk_payload", None)
+                self.client.create_collection(**kwargs)
 
     def upsert(self, chunks: Sequence[Chunk], vectors: Sequence[Sequence[float]]) -> int:
         if len(chunks) != len(vectors):
@@ -150,24 +177,29 @@ class QdrantVectorStore:
                 limit=top_k,
                 with_payload=True,
             )
-            points = getattr(response, "points", response)
+            scored_points = getattr(response, "points", response)
         else:
-            points = self.client.search(
+            scored_points = self.client.search(
                 collection_name=self.config.collection_name,
                 query_vector=list(vector),
                 limit=top_k,
                 with_payload=True,
             )
         results: list[RetrievedChunk] = []
-        for point in points:
-            payload = getattr(point, "payload", None) or {}
+        for scored_point in scored_points:
+            payload = scored_point.payload or {}
             results.append(
                 RetrievedChunk(
-                    chunk_id=str(payload.get("chunk_id", getattr(point, "id", ""))),
+                    chunk_id=str(payload.get("chunk_id", scored_point.id)),
                     document_id=str(payload.get("document_id", "")),
                     text=str(payload.get("text", "")),
-                    score=float(getattr(point, "score", 0.0)),
+                    score=float(scored_point.score),
                     metadata=payload,
                 )
             )
         return results
+
+    def close(self) -> None:
+        """Close the underlying client and release local filesystem locks."""
+        if hasattr(self.client, "close"):
+            self.client.close()

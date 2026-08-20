@@ -48,7 +48,7 @@ def main() -> int:
     args = parser.parse_args()
     if args.runs <= 0:
         raise SystemExit("--runs must be > 0")
-    loader_config = replace(LoaderConfig.from_env(), sample_size=args.sample_size)
+    loader_config = LoaderConfig.from_env(sample_size=args.sample_size)
     embedding_config = EmbeddingConfig.from_env()
     if args.mock_embeddings:
         embedding_config = replace(embedding_config, model_name="dev-hash-embedding")

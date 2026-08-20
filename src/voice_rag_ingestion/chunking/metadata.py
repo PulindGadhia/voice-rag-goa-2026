@@ -37,6 +37,7 @@ class MetadataAwareChunker(SentenceAwareChunker):
                 Chunk(
                     chunk_id=chunk.chunk_id,
                     document_id=chunk.document_id,
+                    parent_chunk_id=chunk.parent_chunk_id,
                     text=chunk.text,
                     language=chunk.language,
                     chunk_index=chunk.chunk_index,

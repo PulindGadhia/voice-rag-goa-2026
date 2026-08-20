@@ -93,7 +93,7 @@ def main() -> int:
         parser.error(str(exc))
     max_candidate_k = max(candidate_k for candidate_k, _ in sizes)
 
-    loader_config = replace(LoaderConfig.from_env(), sample_size=args.sample_size)
+    loader_config = LoaderConfig.from_env(sample_size=args.sample_size)
     embedding_config = EmbeddingConfig.from_env()
     if args.mock_embeddings:
         embedding_config = replace(embedding_config, model_name="dev-hash-embedding", cache_enabled=False)

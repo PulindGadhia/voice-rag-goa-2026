@@ -32,7 +32,7 @@ class BM25Config:
 
 
 class BM25Index:
-    """An in-memory BM25 index that can be saved as safe JSON."""
+    """An in-memory BM25 index with precomputed term frequencies and inverted posting index."""
 
     def __init__(
         self,
@@ -43,9 +43,12 @@ class BM25Index:
         self.config = config or BM25Config()
         self.tokenizer = tokenizer or UnicodeWordTokenizer(self.config.tokenizer)
         self._chunks: dict[str, Chunk] = {}
-        self._tokens: dict[str, list[str]] = {}
+        self._term_frequencies: dict[str, dict[str, int]] = {}
+        self._doc_lengths: dict[str, int] = {}
         self._document_frequency: Counter[str] = Counter()
-        self._average_document_length = 0.0
+        self._postings: dict[str, set[str]] = {}
+        self._total_document_length: int = 0
+        self._average_document_length: float = 0.0
 
     @property
     def chunks(self) -> list[Chunk]:
@@ -57,7 +60,12 @@ class BM25Index:
 
     def rebuild(self, chunks: Iterable[Chunk]) -> int:
         self._chunks.clear()
-        self._tokens.clear()
+        self._term_frequencies.clear()
+        self._doc_lengths.clear()
+        self._document_frequency.clear()
+        self._postings.clear()
+        self._total_document_length = 0
+        self._average_document_length = 0.0
         return self.add(chunks)
 
     def add(self, chunks: Iterable[Chunk]) -> int:
@@ -65,35 +73,55 @@ class BM25Index:
         for chunk in chunks:
             if not chunk.chunk_id or not chunk.text or not chunk.text.strip():
                 continue
-            if chunk.chunk_id not in self._chunks:
+
+            chunk_id = chunk.chunk_id
+            # Handle replacement if chunk_id is already present
+            if chunk_id in self._chunks:
+                old_len = self._doc_lengths.get(chunk_id, 0)
+                self._total_document_length -= old_len
+                old_tf = self._term_frequencies.get(chunk_id, {})
+                for token in old_tf:
+                    self._document_frequency[token] -= 1
+                    if self._document_frequency[token] <= 0:
+                        del self._document_frequency[token]
+                    if token in self._postings and chunk_id in self._postings[token]:
+                        self._postings[token].discard(chunk_id)
+                        if not self._postings[token]:
+                            del self._postings[token]
+            else:
                 added += 1
-            self._chunks[chunk.chunk_id] = chunk
-        self._recompute_statistics()
+
+            tokens = self.tokenizer.tokenize(chunk.text)
+            counts = dict(Counter(tokens))
+            doc_len = len(tokens)
+
+            self._chunks[chunk_id] = chunk
+            self._term_frequencies[chunk_id] = counts
+            self._doc_lengths[chunk_id] = doc_len
+            self._total_document_length += doc_len
+
+            for token in counts:
+                self._document_frequency[token] += 1
+                if token not in self._postings:
+                    self._postings[token] = set()
+                self._postings[token].add(chunk_id)
+
+        self._average_document_length = (
+            self._total_document_length / self.size if self.size > 0 else 0.0
+        )
         return added
 
-    def _recompute_statistics(self) -> None:
-        self._tokens = {
-            chunk_id: self.tokenizer.tokenize(chunk.text)
-            for chunk_id, chunk in self._chunks.items()
-        }
-        self._document_frequency = Counter()
-        for tokens in self._tokens.values():
-            self._document_frequency.update(set(tokens))
-        total_length = sum(len(tokens) for tokens in self._tokens.values())
-        self._average_document_length = total_length / self.size if self.size else 0.0
-
     def _score(self, query_tokens: list[str], chunk_id: str) -> float:
-        tokens = self._tokens[chunk_id]
-        if not tokens:
+        counts = self._term_frequencies.get(chunk_id)
+        if not counts:
             return 0.0
-        counts = Counter(tokens)
-        document_length = len(tokens)
+        document_length = self._doc_lengths.get(chunk_id, 0)
         score = 0.0
         for token in query_tokens:
             term_frequency = counts.get(token, 0)
             if not term_frequency:
                 continue
-            document_frequency = self._document_frequency[token]
+            document_frequency = self._document_frequency.get(token, 0)
             idf = math.log(
                 1.0
                 + (self.size - document_frequency + 0.5)
@@ -111,11 +139,22 @@ class BM25Index:
         if top_k <= 0:
             raise ValueError("top_k must be > 0")
         query_tokens = self.tokenizer.tokenize(query)
-        if not query_tokens:
+        if not query_tokens or self.size == 0:
             return []
+
+        # Use inverted posting index to restrict candidate set
+        candidates: set[str] = set()
+        for token in query_tokens:
+            postings = self._postings.get(token)
+            if postings:
+                candidates.update(postings)
+
+        if not candidates:
+            return []
+
         scored = [
             (self._score(query_tokens, chunk_id), chunk_id)
-            for chunk_id in self._chunks
+            for chunk_id in candidates
         ]
         scored = [item for item in scored if item[0] > 0.0]
         scored.sort(key=lambda item: (-item[0], item[1]))
@@ -127,6 +166,7 @@ class BM25Index:
                 {
                     "chunk_id": chunk.chunk_id,
                     "document_id": chunk.document_id,
+                    "parent_chunk_id": getattr(chunk, "parent_chunk_id", None) or chunk.document_id,
                     "query_id": chunk.query_id,
                     "language": chunk.language,
                     "chunk_strategy": chunk.chunk_strategy,

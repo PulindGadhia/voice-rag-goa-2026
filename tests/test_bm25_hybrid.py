@@ -134,3 +134,60 @@ def test_hybrid_config_is_parameterized():
     assert config.bm25_top_k > 0
     assert config.final_top_k > 0
     assert config.rrf_k >= 0
+
+
+def test_incremental_bm25_add_maintains_statistics_and_postings():
+    index = BM25Index()
+    # Batch 1
+    added_1 = index.add([make_chunk("c1", "first test passage"), make_chunk("c2", "second test passage")])
+    assert added_1 == 2
+    assert index.size == 2
+    assert index._document_frequency["test"] == 2
+    assert index._document_frequency["first"] == 1
+    assert "c1" in index._postings["first"]
+    assert "c2" in index._postings["second"]
+
+    # Batch 2
+    added_2 = index.add([make_chunk("c3", "third test passage with new terms")])
+    assert added_2 == 1
+    assert index.size == 3
+    assert index._document_frequency["test"] == 3
+    assert index._document_frequency["terms"] == 1
+    assert index._total_document_length > 0
+    assert index._average_document_length == index._total_document_length / 3
+
+
+def test_bm25_duplicate_id_replacement_and_idempotency():
+    index = BM25Index()
+    index.add([make_chunk("c1", "alpha beta gamma")])
+    assert index.size == 1
+    assert index._document_frequency["gamma"] == 1
+
+    # Idempotent addition of same chunk
+    added = index.add([make_chunk("c1", "alpha beta delta")])
+    assert added == 0  # Replacement, not new chunk
+    assert index.size == 1
+    assert "gamma" not in index._document_frequency
+    assert index._document_frequency["delta"] == 1
+    assert index._postings.get("gamma") is None
+    assert "c1" in index._postings["delta"]
+
+
+def test_posting_index_candidate_filtering_accuracy():
+    index = BM25Index()
+    index.add([
+        make_chunk("c1", "artificial intelligence machine learning"),
+        make_chunk("c2", "deep learning neural networks"),
+        make_chunk("c3", "botany plant flora biology"),
+    ])
+
+    results = index.search("intelligence", top_k=5)
+    assert len(results) == 1
+    assert results[0].chunk_id == "c1"
+
+    # Query with disjoint term shouldn't match botany doc
+    results_ml = index.search("neural learning", top_k=5)
+    matched_ids = {r.chunk_id for r in results_ml}
+    assert matched_ids == {"c1", "c2"}
+    assert "c3" not in matched_ids
+

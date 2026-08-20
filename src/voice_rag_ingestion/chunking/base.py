@@ -25,6 +25,7 @@ class Chunk:
     language: str | None
     chunk_index: int
     chunk_strategy: str
+    parent_chunk_id: str | None = None
     query_id: str | None = None
     source: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -54,7 +55,7 @@ class ChunkingConfig:
     overlap: int = 32
     min_chunk_size: int = 1
     semantic_similarity_threshold: float = 0.70
-    strategy: str = "fixed"
+    strategy: str = "metadata"
 
     @classmethod
     def from_env(cls) -> "ChunkingConfig":
@@ -67,7 +68,7 @@ class ChunkingConfig:
             semantic_similarity_threshold=float(
                 os.getenv("CHUNK_SEMANTIC_THRESHOLD", "0.70")
             ),
-            strategy=os.getenv("CHUNK_STRATEGY", "fixed"),
+            strategy=os.getenv("CHUNK_STRATEGY", "metadata"),
         )
 
     def __post_init__(self) -> None:
@@ -132,12 +133,14 @@ class ChunkingStrategy(ABC):
             seen.add(key)
             unique_texts.append(text)
 
+        parent_id = document.source.get("parent_chunk_id") or document.document_id
         chunks: list[Chunk] = []
         for index, text in enumerate(unique_texts):
             source = deepcopy(document.source)
             source.update(
                 {
                     "document_id": document.document_id,
+                    "parent_chunk_id": parent_id,
                     "dataset_name": document.dataset_name,
                     "query_id": document.query_id,
                     "chunk_index": index,
@@ -146,10 +149,12 @@ class ChunkingStrategy(ABC):
             )
             metadata = deepcopy(document.metadata)
             metadata.setdefault("original_document_id", document.document_id)
+            metadata.setdefault("parent_chunk_id", parent_id)
             chunks.append(
                 Chunk(
                     chunk_id=chunk_id_for(document.document_id, self.name, index, text),
                     document_id=document.document_id,
+                    parent_chunk_id=parent_id,
                     text=text,
                     language=document.language,
                     chunk_index=index,

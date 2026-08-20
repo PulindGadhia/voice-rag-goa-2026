@@ -16,10 +16,10 @@ class RerankerConfig:
 
     model_name: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
     batch_size: int = 8
-    max_length: int = 512
+    max_length: int = 256
     device: str | None = None
     trust_remote_code: bool = True
-    candidate_top_k: int = 20
+    candidate_top_k: int = 5
     final_top_k: int = 5
     batch_all_candidates: bool = True
     warmup_enabled: bool = True
@@ -33,10 +33,10 @@ class RerankerConfig:
                 "RERANKER_MODEL", "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
             ),
             batch_size=int(os.getenv("RERANKER_BATCH_SIZE", "8")),
-            max_length=int(os.getenv("RERANKER_MAX_LENGTH", "512")),
+            max_length=int(os.getenv("RERANKER_MAX_LENGTH", "256")),
             device=device,
             trust_remote_code=_env_bool("RERANKER_TRUST_REMOTE_CODE", True),
-            candidate_top_k=int(os.getenv("RERANKER_CANDIDATE_TOP_K", "20")),
+            candidate_top_k=int(os.getenv("RERANKER_CANDIDATE_TOP_K", "5")),
             final_top_k=int(os.getenv("RERANKER_FINAL_TOP_K", "5")),
             batch_all_candidates=_env_bool("RERANKER_BATCH_ALL_CANDIDATES", True),
             warmup_enabled=_env_bool("RERANKER_WARMUP_ENABLED", True),

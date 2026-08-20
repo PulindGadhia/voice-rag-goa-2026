@@ -22,21 +22,7 @@ def main() -> int:
     parser.add_argument("--max-chunk-size", type=int, default=64)
     parser.add_argument("--overlap", type=int, default=8)
     args = parser.parse_args()
-    dataset_config = LoaderConfig.from_env()
-    config = LoaderConfig(
-        dataset_name=dataset_config.dataset_name,
-        dataset_config=dataset_config.dataset_config,
-        split=dataset_config.split,
-        sample_size=args.sample_size,
-        streaming=True,
-        development_mode=True,
-        revision=dataset_config.revision,
-        cache_dir=dataset_config.cache_dir,
-        trust_remote_code=dataset_config.trust_remote_code,
-        backend=dataset_config.backend,
-        dataset_server_url=dataset_config.dataset_server_url,
-        log_level=dataset_config.log_level,
-    )
+    config = LoaderConfig.from_env(sample_size=args.sample_size)
     configure_logging(config.log_level)
     try:
         documents, stats = DatasetLoader(config).load_documents()

@@ -67,7 +67,7 @@ def main() -> int:
     if args.candidate_top_k < args.final_top_k:
         parser.error("--candidate-top-k must be >= --final-top-k")
 
-    loader_config = replace(LoaderConfig.from_env(), sample_size=args.sample_size)
+    loader_config = LoaderConfig.from_env(sample_size=args.sample_size)
     embedding_config = EmbeddingConfig.from_env()
     if args.mock_embeddings:
         embedding_config = replace(embedding_config, model_name="dev-hash-embedding")

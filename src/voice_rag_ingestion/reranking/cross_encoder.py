@@ -183,16 +183,19 @@ class CrossEncoderReranker:
 
         if not self.config.warmup_enabled:
             return self.last_timing
-        warmup_candidate = HybridResult(
-            chunk_id="__warmup__",
-            document_id="__warmup__",
-            text=passage,
-            rrf_score=0.0,
-            vector_score=None,
-            bm25_score=None,
-            metadata={},
-        )
-        self.rerank(query, [warmup_candidate] * self.config.warmup_candidates, top_k=1)
+        warmup_candidates = [
+            HybridResult(
+                chunk_id=f"__warmup_{i}__",
+                document_id=f"__warmup_{i}__",
+                text=f"{passage} {i}",
+                rrf_score=0.0,
+                vector_score=None,
+                bm25_score=None,
+                metadata={},
+            )
+            for i in range(max(self.config.warmup_candidates, self.config.candidate_top_k, 5))
+        ]
+        self.rerank(query, warmup_candidates, top_k=min(self.config.candidate_top_k, 3))
         return self.last_timing
 
     def rerank(

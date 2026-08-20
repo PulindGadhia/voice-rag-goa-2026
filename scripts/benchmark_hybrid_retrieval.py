@@ -51,7 +51,7 @@ def main() -> int:
     parser.add_argument("--with-cache", action="store_true", help="Include embedding cache lookup behavior")
     parser.add_argument("--mock-embeddings", action="store_true")
     args = parser.parse_args()
-    loader_config = replace(LoaderConfig.from_env(), sample_size=args.sample_size)
+    loader_config = LoaderConfig.from_env(sample_size=args.sample_size)
     embedding_config = EmbeddingConfig.from_env()
     if not args.with_cache:
         embedding_config = replace(embedding_config, cache_enabled=False)

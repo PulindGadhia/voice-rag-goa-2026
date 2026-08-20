@@ -27,11 +27,12 @@ def main() -> int:
     parser.add_argument("--sample-size", type=int, default=3)
     parser.add_argument("--top-k", type=int, default=None)
     parser.add_argument("--mock-embeddings", action="store_true")
+    parser.add_argument("--bm25-first", action="store_true", help="Use BM25-first on-demand candidate embedding retrieval")
     parser.add_argument("--bm25-index-path", default=os.getenv("BM25_INDEX_PATH", ".cache/bm25_index.json"))
     parser.add_argument("--query", action="append", dest="queries")
     args = parser.parse_args()
 
-    loader_config = replace(LoaderConfig.from_env(), sample_size=args.sample_size)
+    loader_config = LoaderConfig.from_env(sample_size=args.sample_size)
     embedding_config = EmbeddingConfig.from_env()
     if args.mock_embeddings:
         embedding_config = replace(embedding_config, model_name="dev-hash-embedding")
@@ -49,7 +50,8 @@ def main() -> int:
             vector_top_k=args.top_k,
             bm25_top_k=args.top_k,
         )
-    documents, _ = DatasetLoader(loader_config).load_documents()
+    documents, stats = DatasetLoader(loader_config).load_documents()
+    print(f"Loaded {len(documents)} documents from {stats.records_read} records using backend={loader_config.backend} (sample_size={loader_config.sample_size})")
     store = QdrantVectorStore(VectorStoreConfig.from_env())
     index_stats, chunks = index_documents(
         documents,
@@ -70,7 +72,12 @@ def main() -> int:
     bm25_index.save(args.bm25_index_path)
     vector_retriever = VectorRetriever(embedder, store)
     bm25_retriever = BM25Retriever(bm25_index)
-    hybrid_retriever = HybridRetriever(vector_retriever, bm25_retriever, config=hybrid_config)
+    if args.bm25_first:
+        from voice_rag_ingestion.bm25_first import BM25FirstHybridRetriever
+
+        hybrid_retriever = BM25FirstHybridRetriever(bm25_retriever, embedder, config=hybrid_config)
+    else:
+        hybrid_retriever = HybridRetriever(vector_retriever, bm25_retriever, config=hybrid_config)
     queries = args.queries or ["What is a corporation?", "কৰ্পোৰেচন কি?", "कंपनी क्या है?"]
 
     print(f"Indexed documents: {index_stats.documents}; chunks: {index_stats.chunks}; BM25 size: {bm25_index.size}")

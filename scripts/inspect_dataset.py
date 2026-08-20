@@ -22,20 +22,10 @@ def main() -> int:
     parser.add_argument("--config", default=None)
     parser.add_argument("--split", default=None)
     args = parser.parse_args()
-    env_config = LoaderConfig.from_env()
-    config = LoaderConfig(
-        dataset_name=env_config.dataset_name,
-        dataset_config=args.config or env_config.dataset_config,
-        split=args.split or env_config.split,
-        sample_size=args.sample_size if args.sample_size is not None else env_config.sample_size,
-        streaming=True,
-        development_mode=True,
-        revision=env_config.revision,
-        cache_dir=env_config.cache_dir,
-        trust_remote_code=env_config.trust_remote_code,
-        backend=env_config.backend,
-        dataset_server_url=env_config.dataset_server_url,
-        log_level=env_config.log_level,
+    config = LoaderConfig.from_env(
+        sample_size=args.sample_size,
+        dataset_config=args.config or LoaderConfig.dataset_config,
+        split=args.split or LoaderConfig.split,
     )
     configure_logging(config.log_level)
     loader = DatasetLoader(config)

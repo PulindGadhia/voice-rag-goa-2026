@@ -150,3 +150,52 @@ def test_chunk_validation_rejects_non_contiguous_indexes():
     )
     with pytest.raises(ValueError, match="contiguous"):
         validate_chunks(broken)
+
+
+def test_default_chunking_strategy_is_metadata(monkeypatch):
+    monkeypatch.delenv("CHUNK_STRATEGY", raising=False)
+    config = ChunkingConfig()
+    assert config.strategy == "metadata"
+    env_config = ChunkingConfig.from_env()
+    assert env_config.strategy == "metadata"
+
+
+def test_parent_child_chunk_traceability():
+    doc = make_document("First sentence here. Second sentence here. Third sentence here.")
+    chunks = chunk_document(doc, strategy="metadata", config=ChunkingConfig(max_chunk_size=5, overlap=0))
+    assert len(chunks) >= 2
+    for chunk in chunks:
+        assert chunk.parent_chunk_id == doc.document_id
+        assert chunk.source["parent_chunk_id"] == doc.document_id
+        assert chunk.metadata["parent_chunk_id"] == doc.document_id
+        assert chunk.document_id == doc.document_id
+        assert chunk.chunk_strategy == "metadata"
+
+
+def test_metadata_survives_qdrant_payload_and_bm25():
+    from voice_rag_ingestion.qdrant_store import chunk_payload
+    from voice_rag_ingestion.bm25 import BM25Index
+
+    doc = make_document("One sentence. Another sentence.")
+    chunks = chunk_document(doc, strategy="metadata")
+    assert len(chunks) > 0
+    chunk = chunks[0]
+
+    # Vector store payload
+    payload = chunk_payload(chunk)
+    assert payload["chunk_id"] == chunk.chunk_id
+    assert payload["document_id"] == chunk.document_id
+    assert payload["parent_chunk_id"] == doc.document_id
+    assert payload["chunk_strategy"] == "metadata"
+    assert payload["source_lang"] == "eng_Latn"
+    assert payload["target_lang"] == "hin_Deva"
+    assert payload["split"] == "validation"
+    assert payload["passage_index"] == 3
+
+    # BM25 index
+    bm25 = BM25Index()
+    bm25.add(chunks)
+    indexed_chunk = bm25._chunks[chunk.chunk_id]
+    assert indexed_chunk.parent_chunk_id == doc.document_id
+    assert indexed_chunk.source["dataset_name"] == "ai4bharat/MSMARCO-XI"
+

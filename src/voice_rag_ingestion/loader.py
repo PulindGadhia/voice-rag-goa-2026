@@ -99,12 +99,12 @@ class DatasetLoader:
 
         if self.config.sample_size == 0:
             return
-        if self.config.sample_size is not None and self.config.sample_size > 100:
+        if self.config.sample_size is None or self.config.sample_size > 100:
             raise DatasetLoadError(
                 "dataset_server backend supports at most 100 rows per bounded request; "
                 "use backend='hf_datasets' for larger streaming samples"
             )
-        length = min(self.config.sample_size or 100, 100)
+        length = min(self.config.sample_size, 100)
         query = urlencode(
             {
                 "dataset": self.config.dataset_name,
